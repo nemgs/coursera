@@ -1,0 +1,155 @@
+---
+title: "Practical Machine Learning Project"
+output: html_document
+---
+
+### Synopsis
+
+This project is a part of the Practical Machine Learning course from COursera. The project requirements were to create a machine learning algorithm that will try to classify the qualitative correctness of a physical activity based on the data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
+
+More information on this dataset is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+At the end of this I will try to answer the followings questions asked in the project assignment
+1. How you built your model?, 
+2. How you used cross validation?, 
+3. What you think the expected out of sample error is?, and 
+4. Why you made the choices you did?. You will also use your prediction model to predict 20 different test cases. 
+
+#### Loading Required Libraries
+First I load the libraries that are required for this project.
+```{r, echo=TRUE, results='hide', message=FALSE, warning=FALSE}
+library(caret)
+library(randomForest)
+library(doParallel)
+```
+
+#### Data Acquisition
+
+I assume that the user has previously downloaded the 2 datasets in the files pml-training.csv and pml-testing.csv from https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv and https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv into his/her working directory
+
+While loading the data, we make sure that the values that are of use e.g. "NA", "#DIV/0!", "" are marked as NA
+
+```{r, echo=TRUE}
+pml_trainingData <- read.csv("pml-training.csv", na.strings=c("NA","#DIV/0!",""), header=TRUE)
+colnames_train <- colnames(pml_trainingData)
+
+pml_testingData <- read.csv("pml-testing.csv", na.strings=c("NA","#DIV/0!",""), header=TRUE)
+colnames_test <- colnames(pml_testingData)
+```
+
+After looking at the column names length of the training and test data sets, we see that they are the same.
+
+#### Data Cleaning and Processing
+
+For any processing that we do, we will be applying the same processing to the training and test datasets
+
+Looking at the column names, we can see that the 1st 7 columns are related to the subject and recording the time of the experiment. But for purpose of this project, this data is not required. So, we can remove those columns from the dataset.
+
+```{r, echo=TRUE}
+# Drop the 1st seven columns since they are related to the subject doing the activity and not the activity itself.
+pml_trainingData <- pml_trainingData[,8:length(colnames(pml_trainingData))]
+pml_testingData <- pml_testingData[,8:length(colnames(pml_testingData))]
+```
+
+Then we drop all the columns that have have NA values in them, to make our features more concise.
+
+```{r, echo=TRUE}
+# Drop columns with NA data
+pml_trainingData <- pml_trainingData[ , apply(pml_trainingData, 2, function(x) !any(is.na(x)))]
+pml_testingData <- pml_testingData[ , apply(pml_testingData, 2, function(x) !any(is.na(x)))]
+```
+
+After that we check if there are any columns that have very low variability or have near zero values. Removing these would further decrease unneeded features.
+
+```{r, echo=TRUE}
+# Find near zero variables in the training data set. We can see that there are no near zero variables in the remaining data set
+nearZeroValues <- nearZeroVar(pml_trainingData, saveMetrics=TRUE)
+nearZeroValues
+```
+
+Looking at the above result, we can see that there are no columns/features with low variability or zero values. 
+
+At this stage we can see that the number of features left in the dataset are 53
+
+#### Data Slicing
+
+Before we proceed any further, we set the seed so that these results can be replicated.
+
+```{r, echo=TRUE}
+set.seed(25389)
+```
+
+To not overfit the test dataset and have better accuracy I will divide the training dataset further into training and validation datasets. To do that I put 60% of the values from the training dataset into a new training dataset and the remaining into a validation dataset.
+
+```{r, echo=TRUE}
+train_Values <- createDataPartition(y=pml_trainingData$classe, p=0.6, list=FALSE)
+
+pml_trainingData_train <- pml_trainingData[train_Values,]
+pml_trainingData_validation <- pml_trainingData[-train_Values,]
+```
+
+#### Training the Random Forests algorithm
+Now I run the random forests algorithm on the pml_trainingData_train dataset
+
+```{r, echo=TRUE}
+# use the training dataset for training the algorithm
+# use allowparallel for faster processing if the parallel backend is loaded
+modFit <- train(pml_trainingData_train$classe ~ .,  data=pml_trainingData_train, method="rf", trControl=trainControl(method='cv', number=5, allowParallel = TRUE))
+```
+
+#### Running the algorithm output againt Validation dataset
+
+```{r, echo=TRUE}
+validationPredictions <- predict(modFit, pml_trainingData_validation)
+
+confusionMatrix(validationPredictions, pml_trainingData_validation$classe)
+```
+
+Looking at the output of the confusionMatrix, we can see that accuracy of this algorithm is > 99% for this dataset. Now the model is ready to be used for predicting the outcome for the final test dataset
+
+#### Final Predictions against the Test dataset
+```{r, echo=TRUE}
+finalTestPredictions <- predict(modFit, pml_testingData)
+finalTestPredictions
+```
+
+#### Creating the solution files for submission
+
+As mentioned in the assignment, the below script will create the solution files with the appropriate names and final values in them for each of the test dataset rows.
+
+```{r, echo=TRUE}
+pml_write_files = function(x){
+    n = length(x)
+    for(i in 1:n){
+        filename = paste0("problem_id_",i,".txt")
+        write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+    }
+}
+
+pml_write_files(finalTestPredictions)
+```
+
+
+### Conclusion
+1. How you built your model?
+I built my model by first getting the input dataset, cleaning and processing it and then using the random forests algorithm to train it. Since this model gave a very high accuracy value, I did not see the need to explore any other models
+
+2. How you used cross validation?
+To avoid the model overfitting the data, I used cross validation by splitting the training dataset itself into a training and validation data set.
+
+3. What you think the expected out of sample error is?
+The expected OutOfSample error is shown below
+```{r, echo=TRUE}
+
+1 - sum(validationPredictions == pml_trainingData_validation$classe)/length(validationPredictions)
+
+```
+The error is less than ~0.78%
+
+4. Why you made the choices you did?. You will also use your prediction model to predict 20 different test cases.
+
+I made the choices based on the information given in the lecture videos.
+
+I submitted my solutions for the predictions on the final test dataset and all are correct.
+
+
